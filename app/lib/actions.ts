@@ -3,9 +3,17 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import postgres from 'postgres';
+// import sql from '@/app/lib/db';
+import { signIn } from '@/auth';
+import { AuthError } from 'next-auth';
+import { drizzle } from 'drizzle-orm/mysql2';
 
-const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
+import { customers, invoices, revenue } from '@/app/db/schema';
+import { eq } from 'drizzle-orm';
+
+const db = drizzle(<string>process.env.DATABASE_URL);
+
+
 
 const FormSchema = z.object({
     id: z.string(),
@@ -54,12 +62,22 @@ export async function createInvoice(prevState: State, formData: FormData) {
     const date = new Date().toISOString().split('T')[0];
 
     try {
-        await sql`
-            INSERT INTO invoices (customer_id, amount, status, date)
-            VALUES (${customerId}, ${amountInCents}, ${status}, ${date})
-        `;
+        await db.insert(invoices).values({
+            customer_id: customerId,
+            amount: amountInCents,
+            status,
+            date
+        })
+        // await sql(`INSERT INTO invoices (customer_id, amount, status, date)
+        //     VALUES (?, ?, ?, ?)`, [
+        //         customerId,
+        //         amountInCents,
+        //         status,
+        //         date
+        //     ]);
         
     } catch (error) {
+        console.log(error);
         return {
             message: 'Database Error: Failed to Create Invoice.',
         };
@@ -88,11 +106,20 @@ export async function updateInvoice(id: string, prevState: State,formData: FormD
     const amountInCents = amount * 100;
  
     try {
-        await sql`
-            UPDATE invoices
-            SET customer_id = ${customerId}, amount = ${amountInCents}, status = ${status}
-            WHERE id = ${id}
-        `;
+        await db.update(invoices).set({
+            customer_id: customerId,
+            amount: amountInCents,
+            status
+        }).where(eq(invoices.id, id))
+
+        // await sql(`UPDATE invoices
+        //     SET customer_id = ?, amount = ?, status = ?
+        //     WHERE id = ?`, [
+        //         customerId,
+        //         amountInCents,
+        //         status,
+        //         id
+        //     ]);
     } catch (error) {
         return { message: 'Database Error: Failed to Update Invoice.' };
     }
@@ -102,9 +129,30 @@ export async function updateInvoice(id: string, prevState: State,formData: FormD
 
 export async function deleteInvoice(id: string) {
     try {
-        await sql`DELETE FROM invoices WHERE id = ${id}`;
+        await db.delete(invoices).where(eq(invoices.id, id));
+        // await sql('DELETE FROM invoices WHERE id = ?', [id]);
         revalidatePath('/dashboard/invoices');
     } catch (error) {
         throw new Error('Failed to delete invoice.');
     }
+}
+
+export async function authenticate(
+  prevState: string | undefined,
+  formData: FormData,
+) {
+  try {
+    await signIn('credentials', formData);
+  } 
+  catch (error) {
+    if (error instanceof AuthError) {
+      switch (error.type) {
+        case 'CredentialsSignin':
+          return 'Invalid credentials.';
+        default:
+          return 'Something went wrong.';
+      }
+    }
+    throw error;
+  }
 }

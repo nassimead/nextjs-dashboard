@@ -1,0 +1,51 @@
+FROM node:23.11-slim AS base
+# RUN npm install -g npm@latest
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+
+# Step 1. Install dependencies only when needed
+FROM base AS deps
+WORKDIR /app
+COPY package.json pnpm-lock.yaml* ./
+RUN corepack enable
+RUN pnpm install
+
+FROM base AS build
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY ./app ./app
+COPY ./public ./public
+COPY ./drizzle ./drizzle
+COPY *.ts *.js *.json .eslintrc.json ./
+COPY .env.prod ./.env
+RUN corepack enable
+RUN pnpm run build
+
+FROM base
+WORKDIR /app
+COPY --from=build /app/ ./
+CMD ["pnpm", "run", "start"]
+
+# Step 2. Rebuild the source code only when needed
+# FROM base AS builder
+# WORKDIR /app
+# COPY --from=deps /app/node_modules ./node_modules
+# 
+# RUN \
+#   if [ -f yarn.lock ]; then yarn build; \
+#   elif [ -f package-lock.json ]; then npm run build; \
+#   elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm &&pnpm run build; \
+#   else npm run build; \
+#   fi
+
+# # Step 3. Production image, copy all the files and run next
+# FROM base AS runner
+# WORKDIR /app
+# ENV NODE_ENV=production
+# COPY --from=builder /app/public ./public
+# COPY --from=builder /app/.next/standalone ./
+# COPY --from=builder /app/.next/static ./.next/static
+
+# CMD ["node", "./.next/standalone/server.js"]
+#CMD ["node", "server.js"]
